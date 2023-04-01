@@ -36,7 +36,7 @@ class ExperimentRunTest(unittest.TestCase):
         logger.info('model trained')
         logger.info('checking if trained model has been saved...')
         self.assertTrue(os.path.exists(u.config.checkpoint_dir), 'model checkpoint directory was not created!')
-        files = [f for f in os.walk(u.config.checkpoint_dir)]
+        files = list(os.walk(u.config.checkpoint_dir))
         self.assertEqual(len(files[0][-1]), 2, 'model checkpoint files are missing!') # count files in checkpoint_dir
         logger.info('model was saved successfully!')
         logger.info('begin the model evaluation...')
@@ -44,7 +44,7 @@ class ExperimentRunTest(unittest.TestCase):
         logger.info('checking if results have been saved...')
 
         # check if result file created
-        self.assertTrue(os.path.exists(u.config.save_result_fp), 'results file missing') 
+        self.assertTrue(os.path.exists(u.config.save_result_fp), 'results file missing')
         shutil.rmtree(u.config.checkpoint_dir)
         os.remove(u.config.save_result_fp)
         logger.info('testing completed!')

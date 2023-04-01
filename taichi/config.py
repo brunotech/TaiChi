@@ -20,7 +20,7 @@ class Config:
 
     def __init__(self, dictionary: dict = None):
         if dictionary is None:
-            dictionary = dict()
+            dictionary = {}
         self._keys = set(dictionary)
         for key, value in dictionary.items():
             self.__setattr__(key, value)
@@ -52,7 +52,7 @@ class Config:
     def __eq__(self, other):
         if len(self) != len(other):
             return False
-        for key, value in other.items():
-            if key not in self._keys or value != self[key]:
-                return False
-        return True
+        return not any(
+            key not in self._keys or value != self[key]
+            for key, value in other.items()
+        )

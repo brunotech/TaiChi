@@ -76,7 +76,7 @@ class USLP(object):
         initialize and setup environment, data and model for training
         """
         config = self.config
-        logger.info("config:{}".format(config))
+        logger.info(f"config:{config}")
 
         # set up device
         self.device = torch.device(
@@ -103,27 +103,17 @@ class USLP(object):
         # get unique labels and make sure the order stays consistent by sorting
         unique_labels = sorted(list(set(train_labels)))
         self.unique_labels = unique_labels
-        label2idx = {}
-        for i, l in enumerate(unique_labels):
-            label2idx[l] = i
-        idx2label = {}
-        for i, l in enumerate(unique_labels):
-            idx2label[i] = l
+        label2idx = {l: i for i, l in enumerate(unique_labels)}
+        idx2label = dict(enumerate(unique_labels))
         self.idx2label = idx2label
 
         # postive examples in NLI format
-        positive_train_examples = [
-            (data, label)
-            for data, label in zip(train_data, train_labels)
-        ]
+        positive_train_examples = list(zip(train_data, train_labels))
 
         # negative examples in NLI format
         negative_train_examples = []
         for e in positive_train_examples:
-            for l in label2idx:
-                if e[1] != l:
-                    negative_train_examples.append((e[0], l))
-
+            negative_train_examples.extend((e[0], l) for l in label2idx if e[1] != l)
         positive_train_features = self.tokenizer(
             positive_train_examples,
             return_tensors="pt",
@@ -134,11 +124,7 @@ class USLP(object):
 
         # Bert-like tokenizers produce token_type_ids, while RoBERTa-like toknizers don't
         pos_token_type_ids = positive_train_features.get("token_type_ids", None)
-        if pos_token_type_ids is None:
-            self.is_bert_type_tokenizer = False
-        else:
-            self.is_bert_type_tokenizer = True
-
+        self.is_bert_type_tokenizer = pos_token_type_ids is not None
         negative_train_features = self.tokenizer(
             negative_train_examples,
             return_tensors="pt",
@@ -149,38 +135,38 @@ class USLP(object):
 
         positive_train_labels = torch.tensor([ENTAILMENT for _ in train_labels])
 
-        if self.is_bert_type_tokenizer != True:
-            positive_train_dataset = TensorDataset(
-                positive_train_features["input_ids"],
-                positive_train_features["attention_mask"],
-                positive_train_labels,
-            )
-        else:
-            positive_train_dataset = TensorDataset(
+        positive_train_dataset = (
+            TensorDataset(
                 positive_train_features["input_ids"],
                 positive_train_features["attention_mask"],
                 positive_train_features["token_type_ids"],
                 positive_train_labels,
             )
-
+            if self.is_bert_type_tokenizer
+            else TensorDataset(
+                positive_train_features["input_ids"],
+                positive_train_features["attention_mask"],
+                positive_train_labels,
+            )
+        )
         negative_train_labels = torch.tensor(
             [NON_ENTAILMENT for _ in negative_train_examples]
         )
 
-        if self.is_bert_type_tokenizer != True:
-            negative_train_dataset = TensorDataset(
-                negative_train_features["input_ids"],
-                negative_train_features["attention_mask"],
-                negative_train_labels,
-            )
-        else:
-            negative_train_dataset = TensorDataset(
+        negative_train_dataset = (
+            TensorDataset(
                 negative_train_features["input_ids"],
                 negative_train_features["attention_mask"],
                 negative_train_features["token_type_ids"],
                 negative_train_labels,
             )
-
+            if self.is_bert_type_tokenizer
+            else TensorDataset(
+                negative_train_features["input_ids"],
+                negative_train_features["attention_mask"],
+                negative_train_labels,
+            )
+        )
         self.pos_train_dataloader = DataLoader(
             positive_train_dataset,
             batch_size=int(config.train_batch_size // 2),
@@ -199,9 +185,7 @@ class USLP(object):
 
         ood_train_examples = []
         for e in ood_train_data:
-            for l in unique_labels:
-                ood_train_examples.append((e, l))
-
+            ood_train_examples.extend((e, l) for l in unique_labels)
         ood_train_features = self.tokenizer(
             ood_train_examples,
             return_tensors="pt",
@@ -212,20 +196,20 @@ class USLP(object):
 
         ood_train_labels = torch.tensor([NON_ENTAILMENT for _ in ood_train_examples])
 
-        if self.is_bert_type_tokenizer != True:
-            ood_train_dataset = TensorDataset(
-                ood_train_features["input_ids"],
-                ood_train_features["attention_mask"],
-                ood_train_labels,
-            )
-        else:
-            ood_train_dataset = TensorDataset(
+        ood_train_dataset = (
+            TensorDataset(
                 ood_train_features["input_ids"],
                 ood_train_features["attention_mask"],
                 ood_train_features["token_type_ids"],
                 ood_train_labels,
             )
-
+            if self.is_bert_type_tokenizer
+            else TensorDataset(
+                ood_train_features["input_ids"],
+                ood_train_features["attention_mask"],
+                ood_train_labels,
+            )
+        )
         self.ood_train_dataloader = DataLoader(
             ood_train_dataset, batch_size=config.train_batch_size // 4, shuffle=True
         )
@@ -260,7 +244,7 @@ class USLP(object):
                 "params": [
                     p
                     for n, p in param_optimizer
-                    if not any(nd in n for nd in no_decay)
+                    if all(nd not in n for nd in no_decay)
                     if p.requires_grad
                 ],
                 "weight_decay": 0.01,
@@ -292,7 +276,7 @@ class USLP(object):
 
         # training pipeline
         logger.info("***** Running training *****")
-        logger.info("  Num positive examples = {}".format(len(self.train_data)))
+        logger.info(f"  Num positive examples = {len(self.train_data)}")
         logger.info("  Batch size = %d", config.train_batch_size)
         logger.info("  Num steps = %d", num_train_optimization_steps)
 
@@ -435,13 +419,13 @@ class USLP(object):
 
         # save final results
         if config.save_result_fp is not None:
-            res2save = {}
             config_dict = config.__dict__.copy()
             del config_dict["_keys"]
-            res2save["config"] = config_dict
-            res2save["test-indomain"] = res_indomain
-            res2save["test-ood"] = res_ood
-
+            res2save = {
+                "config": config_dict,
+                "test-indomain": res_indomain,
+                "test-ood": res_ood,
+            }
             if os.path.isfile(config.save_result_fp):
                 with open(config.save_result_fp, "r") as f:
                     final_res = json.load(f)
@@ -466,9 +450,7 @@ class USLP(object):
 
         test_data_in_nli_format = []
         for e in test_data:
-            for l in unique_labels:
-                test_data_in_nli_format.append((e, l))
-
+            test_data_in_nli_format.extend((e, l) for l in unique_labels)
         features = tokenizer(
             test_data_in_nli_format,
             return_tensors="pt",
@@ -506,11 +488,7 @@ class USLP(object):
                     token_type_ids=token_type_ids,
                 )[0]
                 pred = nn.Softmax(dim=-1)(logits).cpu().detach().numpy()
-                if preds is None:
-                    preds = pred
-                else:
-                    preds = np.concatenate((preds, pred))
-
+                preds = pred if preds is None else np.concatenate((preds, pred))
         preds = np.reshape(preds, (-1, len(unique_labels), 2))
         max_pos_idx = np.argmax(preds[:, :, 0], axis=1)
         max_prob = np.max(preds[:, :, 0], axis=1)

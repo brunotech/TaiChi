@@ -81,14 +81,14 @@ class DNNC(object):
         initialize and setup environment, data and model for training
         """
         config = self.config
-        logger.info("config: {}".format(config))
+        logger.info(f"config: {config}")
 
         # set up device
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() and not config.no_cuda else "cpu"
         )
 
-        logger.info("device: {}".format(self.device))
+        logger.info(f"device: {self.device}")
 
         # set up seeds
         set_seed(config.seed)
@@ -106,12 +106,8 @@ class DNNC(object):
         # get unique labels and make sure the order stays consistent by sorting
         unique_labels = sorted(list(set(self.train_labels)))
         self.unique_labels = unique_labels
-        label2idx = {}
-        for i, l in enumerate(unique_labels):
-            label2idx[l] = i
-        idx2label = {}
-        for i, l in enumerate(unique_labels):
-            idx2label[i] = l
+        label2idx = {l: i for i, l in enumerate(unique_labels)}
+        idx2label = dict(enumerate(unique_labels))
         self.idx2label = idx2label
 
         self.train_label_ids = [label2idx[l] for l in self.train_labels]
@@ -125,20 +121,12 @@ class DNNC(object):
                     if j <= i:
                         continue
 
-                    positive_train_examples.append(
+                    positive_train_examples.extend(
                         (
-                            self.train_data[i],
-                            self.train_data[j]
+                            (self.train_data[i], self.train_data[j]),
+                            (self.train_data[j], self.train_data[i]),
                         )
                     )
-
-                    positive_train_examples.append(
-                        (
-                            self.train_data[j],
-                            self.train_data[i]
-                        )
-                    )
-
                 else:
                     negative_train_examples.append(
                         (
@@ -160,11 +148,7 @@ class DNNC(object):
 
         # checking if token_type_ids available for positive examples - should be same for all
         pos_token_type_ids = positive_train_features.get("token_type_ids", None)
-        if pos_token_type_ids is None:
-            self.is_bert_type_tokenizer = False
-        else:
-            self.is_bert_type_tokenizer = True
-
+        self.is_bert_type_tokenizer = pos_token_type_ids is not None
         negative_train_features = self.tokenizer(
             negative_train_examples,
             return_tensors="pt",
@@ -180,38 +164,38 @@ class DNNC(object):
             [ENTAILMENT for _ in range(num_positive_train_examples)]
         )
 
-        if self.is_bert_type_tokenizer != True:
-            positive_train_dataset = TensorDataset(
-                positive_train_features["input_ids"],
-                positive_train_features["attention_mask"],
-                positive_train_labels,
-            )
-        else:
-            positive_train_dataset = TensorDataset(
+        positive_train_dataset = (
+            TensorDataset(
                 positive_train_features["input_ids"],
                 positive_train_features["attention_mask"],
                 positive_train_features["token_type_ids"],
                 positive_train_labels,
             )
-
+            if self.is_bert_type_tokenizer
+            else TensorDataset(
+                positive_train_features["input_ids"],
+                positive_train_features["attention_mask"],
+                positive_train_labels,
+            )
+        )
         negative_train_labels = torch.tensor(
             [NON_ENTAILMENT for _ in range(num_negative_train_examples)]
         )
 
-        if self.is_bert_type_tokenizer != True:
-            negative_train_dataset = TensorDataset(
-                negative_train_features["input_ids"],
-                negative_train_features["attention_mask"],
-                negative_train_labels,
-            )
-        else:
-            negative_train_dataset = TensorDataset(
+        negative_train_dataset = (
+            TensorDataset(
                 negative_train_features["input_ids"],
                 negative_train_features["attention_mask"],
                 negative_train_features["token_type_ids"],
                 negative_train_labels,
             )
-
+            if self.is_bert_type_tokenizer
+            else TensorDataset(
+                negative_train_features["input_ids"],
+                negative_train_features["attention_mask"],
+                negative_train_labels,
+            )
+        )
         self.pos_train_dataloader = DataLoader(
             positive_train_dataset,
             batch_size=int(config.train_batch_size // 2),
@@ -231,8 +215,7 @@ class DNNC(object):
         # for dnnc, unique train labels should get replaced by train data
         ood_train_examples = []
         for e in ood_train_data:
-            for l in self.train_data:
-                ood_train_examples.append((e, l))
+            ood_train_examples.extend((e, l) for l in self.train_data)
         ood_train_features = self.tokenizer(
             ood_train_examples,
             return_tensors="pt",
@@ -245,19 +228,20 @@ class DNNC(object):
         del ood_train_examples # free memory
 
         ood_train_labels = torch.tensor([NON_ENTAILMENT for _ in range(num_ood_train_examples)])
-        if self.is_bert_type_tokenizer != True:
-            ood_train_dataset = TensorDataset(
-                ood_train_features["input_ids"],
-                ood_train_features["attention_mask"],
-                ood_train_labels,
-            )
-        else:
-            ood_train_dataset = TensorDataset(
+        ood_train_dataset = (
+            TensorDataset(
                 ood_train_features["input_ids"],
                 ood_train_features["attention_mask"],
                 ood_train_features["token_type_ids"],
                 ood_train_labels,
             )
+            if self.is_bert_type_tokenizer
+            else TensorDataset(
+                ood_train_features["input_ids"],
+                ood_train_features["attention_mask"],
+                ood_train_labels,
+            )
+        )
         self.ood_train_dataloader = DataLoader(
             ood_train_dataset, batch_size=config.train_batch_size // 4, shuffle=True
         )
@@ -295,7 +279,7 @@ class DNNC(object):
                 "params": [
                     p
                     for n, p in param_optimizer
-                    if not any(nd in n for nd in no_decay)
+                    if all(nd not in n for nd in no_decay)
                     if p.requires_grad
                 ],
                 "weight_decay": 0.01,
@@ -326,7 +310,7 @@ class DNNC(object):
 
         # training pipeline
         logging.info("***** Running training *****")
-        logging.info("  Num positive examples = {}".format(len(self.train_data)))
+        logging.info(f"  Num positive examples = {len(self.train_data)}")
         logging.info("  Batch size = %d", config.train_batch_size)
         logging.info("  Num steps = %d", num_train_optimization_steps)
 
@@ -467,13 +451,13 @@ class DNNC(object):
 
         # save final results
         if config.save_result_fp is not None:
-            res2save = {}
             config_dict = config.__dict__.copy()
             del config_dict["_keys"]
-            res2save["config"] = config_dict
-            res2save["test-indomain"] = res_indomain
-            res2save["test-ood"] = res_ood
-
+            res2save = {
+                "config": config_dict,
+                "test-indomain": res_indomain,
+                "test-ood": res_ood,
+            }
             if os.path.isfile(config.save_result_fp):
                 with open(config.save_result_fp, "r") as f:
                     final_res = json.load(f)
@@ -500,10 +484,8 @@ class DNNC(object):
 
         test_data_in_nli_format = []
         test_labels_in_nli_format = []
-        for i, sample1 in enumerate(test_data):
-            for j, sample2 in enumerate(train_data):
-                test_data_in_nli_format.append((sample1, sample2))
-
+        for sample1 in test_data:
+            test_data_in_nli_format.extend((sample1, sample2) for sample2 in train_data)
         features = tokenizer(
             test_data_in_nli_format,
             return_tensors="pt",
@@ -540,10 +522,7 @@ class DNNC(object):
                     token_type_ids=token_type_ids,
                 )[0]
                 pred = nn.Softmax(dim=-1)(logits).cpu().detach().numpy()
-                if preds is None:
-                    preds = pred
-                else:
-                    preds = np.concatenate((preds, pred))
+                preds = pred if preds is None else np.concatenate((preds, pred))
         preds = np.reshape(preds, (-1, len(train_data), 2))
         max_pos_idx = np.argmax(preds[:, :, 0], axis=1)
         max_prob = np.max(preds[:, :, 0], axis=1)

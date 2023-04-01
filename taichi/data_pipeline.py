@@ -29,21 +29,14 @@ class DataPipeline(object):
         """
         df = pd.read_csv(self.data_path, names=["utterance", "label"])
         self.raw_data = df
-        if n_shot is not None:
-            examples_per_class = dict(Counter((df.label)))
-            minimum_examples_per_class = min(examples_per_class.values())
-            if minimum_examples_per_class >= n_shot:
-                subsampled_df = df.groupby("label").sample(
-                    n=n_shot, random_state=random_state
-                )
-                return subsampled_df
-            else:
-                error_message = "number of examples per class are not enough to sample based on n_shot={} value".format(
-                    n_shot
-                )
-                raise Exception(error_message)
-        else:
+        if n_shot is None:
             return df
+        examples_per_class = dict(Counter((df.label)))
+        minimum_examples_per_class = min(examples_per_class.values())
+        if minimum_examples_per_class >= n_shot:
+            return df.groupby("label").sample(n=n_shot, random_state=random_state)
+        error_message = f"number of examples per class are not enough to sample based on n_shot={n_shot} value"
+        raise Exception(error_message)
 
     def sample_from_json(self, n_shot=None, split="train", random_state=0):
         """
@@ -62,29 +55,20 @@ class DataPipeline(object):
                 self.raw_data[split], columns=["utterance", "label"]
             )
         except KeyError as default_error:
-            error_message = "split {} not found, please select among the existing splits that exist: {}".format(
-                split, list(self.raw_data.keys())
-            )
+            error_message = f"split {split} not found, please select among the existing splits that exist: {list(self.raw_data.keys())}"
             raise Exception(error_message)
 
         cols = list(df.columns)
         cols = cols[:1] + [cols[-1]] + cols[1:-1]
         df = df[cols]
-        if n_shot is not None:
-            examples_per_class = dict(Counter((df.label)))
-            minimum_examples_per_class = min(examples_per_class.values())
-            if minimum_examples_per_class >= n_shot:
-                subsampled_df = df.groupby("label").sample(
-                    n=n_shot, random_state=random_state
-                )
-                return subsampled_df
-            else:
-                error_message = "number of examples per class are not enough to sample based on n_shot={} value".format(
-                    n_shot
-                )
-                raise Exception(error_message)
-        else:
+        if n_shot is None:
             return df
+        examples_per_class = dict(Counter((df.label)))
+        minimum_examples_per_class = min(examples_per_class.values())
+        if minimum_examples_per_class >= n_shot:
+            return df.groupby("label").sample(n=n_shot, random_state=random_state)
+        error_message = f"number of examples per class are not enough to sample based on n_shot={n_shot} value"
+        raise Exception(error_message)
 
     def save_subsampled_data_to_csv(
         self,
